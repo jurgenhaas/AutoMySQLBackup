@@ -9,7 +9,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
@@ -81,6 +81,7 @@ load_default_config() {
   CONFIG_mysql_dump_single_transaction='no'
   CONFIG_mysql_dump_master_data=
   CONFIG_mysql_dump_full_schema='yes'
+  CONFIG_mysql_dump_schema='no'
   CONFIG_mysql_dump_dbstatus='yes'
   CONFIG_mysql_dump_differential='no'
   CONFIG_mysql_dump_login_path='automysqldump'
@@ -165,7 +166,7 @@ mail_cleanup () {
 							  'bunzip2 <mail_attachment_2011-08-13_13h15m.tar.bz2 | pax -rv' to extract the content."
 					  for ((j=0;j<"${#files[@]}";j++)); do
 						if [[ "x$CONFIG_mail_use_uuencoded_attachments" = "xyes" ]]; then
-						  if (( $j = 0 )); then
+						  if (( $j == 0 )); then
 							cat "$log_file" > "$temp"
 							uuencode "$j" "$j" >> "$temp"
 						  else
@@ -465,6 +466,9 @@ parse_configuration () {
     # OPT string for use with mysqldump fullschema
     opt_fullschema=( '--all-databases' '--routines' '--no-data' )
 
+    # OPT string for use with mysqldump schema
+    opt_schema=( '--routines' '--no-data' )
+
 	# OPT string for use with mysqlstatus
 	opt_dbstatus=( '--status' )
 
@@ -473,6 +477,7 @@ parse_configuration () {
 		  opt=( "${opt[@]}" '--ssl-mode=REQUIRED' )
 		  mysql_opt=( "${mysql_opt[@]}" '--ssl-mode=REQUIRED' )
 		  opt_fullschema=( "${opt_fullschema[@]}" '--ssl-mode=REQUIRED' )
+		  opt_schema=( "${opt_schema[@]}" '--ssl-mode=REQUIRED' )
 		  opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl-mode=REQUIRED' )
 		}
 	else
@@ -480,6 +485,7 @@ parse_configuration () {
 		  opt=( "${opt[@]}" '--ssl' )
 		  mysql_opt=( "${mysql_opt[@]}" '--ssl' )
 		  opt_fullschema=( "${opt_fullschema[@]}" '--ssl' )
+		  opt_schema=( "${opt_schema[@]}" '--ssl' )
 		  opt_dbstatus=( "${opt_dbstatus[@]}" '--ssl' )
 		}
 	fi
@@ -487,26 +493,30 @@ parse_configuration () {
     [[ "${CONFIG_mysql_dump_single_transaction}" = "yes" ]]	&& {
 	  opt=( "${opt[@]}" '--single-transaction' )
 	  opt_fullschema=( "${opt_fullschema[@]}" '--single-transaction' )
+	  opt_schema=( "${opt_schema[@]}" '--single-transaction' )
     }
     [[ "${CONFIG_mysql_dump_commcomp}" = "yes" ]]		&& {
 	  opt=( "${opt[@]}" '--compress' )
 	  opt_fullschema=( "${opt_fullschema[@]}" '--compress' )
+	  opt_schema=( "${opt_schema[@]}" '--compress' )
 	  opt_dbstatus=( "${opt_dbstatus[@]}" '--compress' )
     }
     [[ "${CONFIG_mysql_dump_max_allowed_packet}" ]]		&& {
 	  opt=( "${opt[@]}" "--max_allowed_packet=${CONFIG_mysql_dump_max_allowed_packet}" )
 	  opt_fullschema=( "${opt_fullschema[@]}" "--max_allowed_packet=${CONFIG_mysql_dump_max_allowed_packet}" )
+	  opt_schema=( "${opt_schema[@]}" "--max_allowed_packet=${CONFIG_mysql_dump_max_allowed_packet}" )
     }
     [[ "${CONFIG_mysql_dump_socket}" ]]			&& {
 	  opt=( "${opt[@]}" "--socket=${CONFIG_mysql_dump_socket}" )
 	  mysql_opt=( "${mysql_opt[@]}" "--socket=${CONFIG_mysql_dump_socket}" )
 	  opt_fullschema=( "${opt_fullschema[@]}" "--socket=${CONFIG_mysql_dump_socket}" )
+	  opt_schema=( "${opt_schema[@]}" "--socket=${CONFIG_mysql_dump_socket}" )
 	  opt_dbstatus=( "${opt_dbstatus[@]}" "--socket=${CONFIG_mysql_dump_socket}" )
     }
     [[ "${CONFIG_mysql_dump_port}" ]]			&& {
 	  opt=( "${opt[@]}" "--port=${CONFIG_mysql_dump_port}" )
 	  mysql_opt=( "${mysql_opt[@]}" "--port=${CONFIG_mysql_dump_port}" )
-	  opt_fullschema=( "${opt_fullschema[@]}" "--port=${CONFIG_mysql_dump_port}" )
+	  opt_schema=( "${opt_schema[@]}" "--port=${CONFIG_mysql_dump_port}" )
 	  opt_dbstatus=( "${opt_dbstatus[@]}" "--port=${CONFIG_mysql_dump_port}" )
     }
 
@@ -520,7 +530,7 @@ parse_configuration () {
     else
 	    opt=( "${opt[@]}" '--databases' )
     fi
-      
+
 	# if differential backup is active and the specified rotation is smaller than 21 days, set it to 21 days to ensure, that
 	# master backups aren't deleted.
 	if [[ "x$CONFIG_mysql_dump_differential" = "xyes" ]] && (( ${CONFIG_rotation_daily} < 21 )); then
@@ -668,7 +678,7 @@ process_dbs() {
   manifest_file="${CONFIG_backup_dir}/${subfolder}${subsubfolder}/Manifest"
   fname="${CONFIG_backup_dir}/${subfolder}${subsubfolder}/${prefix}${name}_${datetimestamp}${midfix}${extension}"
 
-  (( $CONFIG_debug )) && echo "DEBUG: process_dbs >> Setting manifest file to: ${manifest_file}" 
+  (( $CONFIG_debug )) && echo "DEBUG: process_dbs >> Setting manifest file to: ${manifest_file}"
 
   if (( $multipledbs )); then
 	# multiple databases
@@ -692,7 +702,7 @@ process_dbs() {
 
 	  # -> generate diff file
 	  let "filename_flags=0x00"
-	  
+
 # 	  ## -> get latest differential manifest entry for specified db
 # 	  if get_latest_manifest_entry_for_db "$db" 1; then
 # 		pid="${manifest_entry[2]}"
@@ -785,12 +795,13 @@ process_dbs() {
 		  ;;
 		esac
 		add_manifest_entry "$manifest_file" "$cfname" "$pid" "$db" && parse_manifest "$manifest_file" && cp -al "$cfname" "${manifest_latest_master_entry[0]}" "${CONFIG_backup_dir}"/latest/ && echo "generated $cfname" && return 0 || return 1
-		
+
 	  fi
 	  # <- generate diff filename
 
   else
 	  cfname="${fname}${suffix}"
+	  cfschemaname="${fname}.schema${suffix}"
 	  if (( $CONFIG_dryrun )); then
 		case "${CONFIG_mysql_dump_compression}" in
 		'gzip')
@@ -807,14 +818,17 @@ process_dbs() {
 	  else
 		case "${CONFIG_mysql_dump_compression}" in
 		'gzip')
+		  [[ "${CONFIG_mysql_dump_schema}" = 'yes' ]] && { $MYSQLDUMP "${opt_schema[@]}" "$@" | gzip_compression > "${cfschemaname}"; }
 		  $MYSQLDUMP "${opt[@]}" "$@" | gzip_compression > "${cfname}"
 		  ret=$?
 		  ;;
 		'bzip2')
+		  [[ "${CONFIG_mysql_dump_schema}" = 'yes' ]] && { $MYSQLDUMP "${opt_schema[@]}" "$@" | bzip2_compression > "${cfschemaname}"; }
 		  $MYSQLDUMP "${opt[@]}" "$@" | bzip2_compression > "${cfname}"
 		  ret=$?
 		  ;;
 		*)
+		  [[ "${CONFIG_mysql_dump_schema}" = 'yes' ]] && { $MYSQLDUMP "${opt_schema[@]}" "$@" > "${cfschemaname}"; }
 		  $MYSQLDUMP "${opt[@]}" "$@" > "${cfname}"
 		  ret=$?
 		  ;;
@@ -822,7 +836,7 @@ process_dbs() {
 	  fi
 
   fi
-  
+
 
   if (( $ret == 0 )); then
 	  echo "Rotating $(( ${rotation}/${rotation_divisor} )) ${rotation_string} backups for ${name}"
@@ -832,8 +846,10 @@ process_dbs() {
 	    find "${CONFIG_backup_dir}/${subfolder}${subsubfolder}" -mtime +"${rotation}" -type f -exec rm {} \;
 	  fi
 	  files_postprocessing "$cfname"
+	  [[ "${CONFIG_mysql_dump_schema}" = 'yes' ]] && { files_postprocessing "${cfschemaname}"; }
 	  tmp_flags=$?; var=; (( $tmp_flags & $flags_files_postprocessing_success_encrypt )) && var=.enc
 	  backupfiles=( "${backupfiles[@]}" "${cfname}${var}" )
+	  [[ "${CONFIG_mysql_dump_schema}" = 'yes' ]] && { backupfiles=( "${backupfiles[@]}" "${cfschemaname}${var}" ); }
   else
 	  let "E |= $E_dbdump_failed"
 	  echo "dbdump with parameters \"${CONFIG_db_names[@]}\" \"${cfname}\" failed!"
@@ -1043,7 +1059,7 @@ check_dependencies () {
 	else
 		[[ "x$CONFIG_mysql_dump_compression" = 'xbzip2' ]] && dependencies=("${dependencies[@]}" 'bzip2' )
 		[[ "x$CONFIG_mysql_dump_compression" = 'xgzip' ]] && dependencies=("${dependencies[@]}" 'gzip' )
-	fi	  
+	fi
 
     if [[ "x$CONFIG_mailcontent" = 'xlog' || "x$CONFIG_mailcontent" = 'xquiet' ]]; then
       dependencies=( "${dependencies[@]}" 'mail' )
@@ -1223,7 +1239,7 @@ parse_manifest() {
 		(( $CONFIG_debug )) && echo "Found multiple entries with the same filename. Removing all but the first-found entry from manifest."
 		# remove all entries with this filename and add a new one based on the values of the item already in the array
 		rm_manifest_entry_by_filename "$1" "${manifest_array[i]}" 1 && add_manifest_entry "$1" "${manifest_array[i]}" "${manifest_array[i+3]}"
-		continue 2	# the original entry, to which we compared, is already in the manifest_array; no matter if this is resolved or not, we don't 
+		continue 2	# the original entry, to which we compared, is already in the manifest_array; no matter if this is resolved or not, we don't
 					# need to add this entry to the manifest_array
 	  elif [[ "x${manifest_array[i+1]}" = "x${line_arr[2]}" ]]; then	# found entry with different filename but same md5sum - file copied and renamed?!
 		if [[ ! -s "${line_arr[0]}" ]]; then # empty file - don't start to compare md5sums ...
@@ -1232,7 +1248,7 @@ parse_manifest() {
 		  (( $CONFIG_debug )) && echo "Found multiple entries with the same md5sum but different filename."
 		  (( $CONFIG_debug )) && echo -e ">> fname_manifest:\t${manifest_array[i]}\t${manifest_array[i+1]}\n>> fname_line:\t\t${line_arr[0]}\t${line_arr[2]}"
 		  if [[ "x${line_arr[6]}" != "x0" ]]; then
-			if [[ "x${manifest_array[i+3]}" = "x${line_arr[6]}" ]]; then	# parent id is the same; TODO inform user of this predicament and suggest solution 
+			if [[ "x${manifest_array[i+3]}" = "x${line_arr[6]}" ]]; then	# parent id is the same; TODO inform user of this predicament and suggest solution
 			  manifest_entries_user_action_required=( "${manifest_entries_user_action_required[@]}" "$1" "${manifest_array[i]}" "The file has an identical copy with the same parent id. If you don't know why it exists, it is safe to remove it." )
 			  continue 2
 			else
@@ -1249,7 +1265,7 @@ parse_manifest() {
       manifest_array[(n-1)*${fields}+i/2]="${line_arr[i]}"
       #echo "manifest array key $((($n-1)*4+$i/2)) with value ${line_arr[i]}"
     done
-    
+
     ((n++))
   done < <(sort -t $'\t' -k"1" "$1")
   (( $CONFIG_debug )) && echo "<<<<<<< # manifest entries: $((${#manifest_array[@]}/$fields))"
@@ -1391,7 +1407,7 @@ get_latest_manifest_entry_for_db() {
 }
 
 # @params:	manifest_file	filename/md5sum/id/rel_id	[1(=don't parse manifest after finished)]
-# if second parameters 
+# if second parameters
 #
 #	lock manifest -> use awk, print all lines that don't have second parameter at the appropriate field -> unlock manifest
 #	param3=0 -> parse manifest
@@ -1493,7 +1509,7 @@ extended_select() {
 			echo -e "$i) [ ]\t${list[i]}"
 		  fi
 		done
-		
+
 		echo -e "$i)\tDONE"
 		done_id=$i
 
@@ -1644,7 +1660,7 @@ extended_select() {
 	for i in "${selection[@]}"; do
 	  [[ "x$i" != "x$done_id" ]] && { extended_select_return=("${extended_select_return[@]}" "${list[i]}"); extended_select_return_id=("${extended_select_return_id[@]}" "$i"); }
 	done
-	
+
 }
 
 # END _functions
@@ -1670,7 +1686,7 @@ method_backup () {
 
 	# load mysql commands
 	mysql_commands
-	
+
 	(( $CONFIG_dryrun )) && {
 	  echo "NOTE: We are dry-running. That means, that the script just shows you what it would do, if it were operating normally."
 	  echo "THE PRINTED COMMANDS CAN'T BE COPIED AND EXECUTED IF THERE ARE SPECIAL CHARACTERS, SPACES, ETC. IN THERE THAT WOULD NEED TO BE PROPERLY QUOTED IN ORDER TO WORK. THESE WERE CORRECTLY QUOTED FOR THE OUTPUT COMMAND, BUT CAN'T BE SEEN NOW."
@@ -1679,7 +1695,7 @@ method_backup () {
 
 	export LC_ALL=C
 	PROGNAME=`basename $0`
-	PATH=${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/local/mysql/bin 
+	PATH=${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/local/mysql/bin
 	version=3.0
 	fields=5 # manifest fields
 
@@ -1725,7 +1741,7 @@ method_backup () {
 	echo "======================================================================"
 	echo "AutoMySQLBackup version ${version}"
 	echo "http://sourceforge.net/projects/automysqlbackup/"
-	echo 
+	echo
 	echo "Backup of Database Server - ${CONFIG_mysql_dump_host_friendly:-$CONFIG_mysql_dump_host}"
 	( IFS=,; echo "Databases - ${CONFIG_db_names[*]}" )
 	( IFS=,; echo "Databases (monthly) - ${CONFIG_db_month_names[*]}" )
@@ -1750,7 +1766,7 @@ method_backup () {
 		echo "Backup local files. Doing this weekly on CONFIG_do_weekly."
 		echo
 		backup_local_files "${CONFIG_backup_dir}/backup_local_files/bcf_weekly_${datetimestamp}_${date_weekno}.tar"
-		tmp_flags=$?; var=; 
+		tmp_flags=$?; var=;
 		if (( $? == 0 )); then
 		  echo "success!"
 		  backupfiles=( "${backupfiles[@]}" "${CONFIG_backup_dir}/backup_local_files/bcf_weekly_${datetimestamp}_${date_weekno}.tar" )
@@ -1824,7 +1840,7 @@ method_backup () {
 		echo
 		echo "======================================================================"
 		echo
-	  
+
 	fi
 	# <- dump full schema
 
@@ -1888,7 +1904,7 @@ method_backup () {
 		echo
 		echo "======================================================================"
 		echo
-	  
+
 	fi
 	# <- dump status
 
@@ -2040,10 +2056,10 @@ method_list_manifest_entries () {
 
 	# load mysql commands
 	mysql_commands
-	
+
 	export LC_ALL=C
 	PROGNAME=`basename $0`
-	PATH=${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/local/mysql/bin 
+	PATH=${PATH}:/usr/local/bin:/usr/bin:/bin:/usr/local/mysql/bin
 	version=3.0
 	fields=5 # manifest fields
 
